@@ -436,5 +436,5 @@ The TrashNet dataset belongs to its original creator. Refer to the original data
 
 **Pradeep Kumar Singha**
 
-Software Development Student  
-Kolkata, West Bengal, India
+Nirmaan AI/ML Trainee 
+Btech Final Year
