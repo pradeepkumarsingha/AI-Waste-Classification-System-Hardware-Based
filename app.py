@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import tensorflow as tf
 import numpy as np
@@ -8,7 +9,7 @@ from PIL import Image
 # CONFIGURATION
 # ==========================================
 
-MODEL_PATH = r"D:\AI Hardware\models\waste_classifier.keras"
+MODEL_PATH = r"D:\AI Hardware\models\waste_classifier_finetuned.keras"
 
 CLASS_NAMES = [
     "cardboard",
@@ -20,6 +21,7 @@ CLASS_NAMES = [
 ]
 
 IMG_SIZE = (224, 224)
+CONFIDENCE_THRESHOLD = 0.70
 
 
 # ==========================================
@@ -39,28 +41,29 @@ st.set_page_config(
 
 @st.cache_resource
 def load_model():
+    return tf.keras.models.load_model(MODEL_PATH)
 
-    model = tf.keras.models.load_model(
-        MODEL_PATH
-    )
 
-    return model
+# ==========================================
+# CHECK MODEL FILE
+# ==========================================
 
+if not os.path.exists(MODEL_PATH):
+    st.error(f"Model file not found: {MODEL_PATH}")
+    st.stop()
 
 model = load_model()
 
 
 # ==========================================
-# CHECK MODEL
+# CHECK MODEL OUTPUTS
 # ==========================================
 
 if model.output_shape[-1] != len(CLASS_NAMES):
-
     st.error(
         f"Model has {model.output_shape[-1]} outputs, "
         f"but CLASS_NAMES contains {len(CLASS_NAMES)} classes."
     )
-
     st.stop()
 
 
@@ -68,13 +71,15 @@ if model.output_shape[-1] != len(CLASS_NAMES):
 # HEADER
 # ==========================================
 
-st.title(
-    "♻️ AI Waste Classification System"
-)
+st.title("♻️ AI Waste Classification System")
 
 st.write(
-    "Upload an image of waste and the AI model "
-    "will classify it as Metal, Paper, or Plastic."
+    "Upload an image. The AI model will classify it into one of six "
+    "waste categories. Low-confidence predictions are marked as unknown."
+)
+
+st.info(
+    f"Unknown threshold: {CONFIDENCE_THRESHOLD * 100:.0f}%"
 )
 
 st.divider()
@@ -86,12 +91,7 @@ st.divider()
 
 uploaded_file = st.file_uploader(
     "Upload Waste Image",
-    type=[
-        "jpg",
-        "jpeg",
-        "png",
-        "webp"
-    ]
+    type=["jpg", "jpeg", "png", "webp"]
 )
 
 
@@ -101,125 +101,84 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
 
-    # --------------------------------------
-    # Load image
-    # --------------------------------------
-
-    image = Image.open(
-        uploaded_file
-    ).convert("RGB")
-
-
-    # --------------------------------------
-    # Display image
-    # --------------------------------------
+    input_image = Image.open(uploaded_file).convert("RGB")
 
     st.image(
-        image,
+        input_image,
         caption="Uploaded Image"
     )
 
+    # Resize image
+    resized_image = input_image.resize(IMG_SIZE)
 
-    # --------------------------------------
-    # Resize
-    # --------------------------------------
-
-    resized_image = image.resize(
-        IMG_SIZE
-    )
-
-
-    # --------------------------------------
-    # Convert to NumPy
-    # --------------------------------------
-
+    # Convert image to NumPy array
     image_array = np.array(
         resized_image,
         dtype=np.float32
     )
 
-
-    # --------------------------------------
     # Add batch dimension
-    # --------------------------------------
+    image_array = np.expand_dims(image_array, axis=0)
 
-    image_array = np.expand_dims(
-        image_array,
-        axis=0
-    )
-
-
-    # --------------------------------------
-    # Prediction
-    # --------------------------------------
-
+    # Predict
     predictions = model.predict(
         image_array,
         verbose=0
     )[0]
 
+    # Find highest probability
+    predicted_index = int(np.argmax(predictions))
+    raw_predicted_class = CLASS_NAMES[predicted_index]
+    confidence = float(predictions[predicted_index])
 
-    # --------------------------------------
-    # Prediction details
-    # --------------------------------------
-
-    predicted_index = np.argmax(
-        predictions
-    )
-
-    predicted_class = CLASS_NAMES[
-        predicted_index
-    ]
-
-    confidence = (
-        predictions[predicted_index] * 100
-    )
-
+    # Apply threshold
+    if confidence < CONFIDENCE_THRESHOLD:
+        final_class = "unknown"
+        is_unknown = True
+    else:
+        final_class = raw_predicted_class
+        is_unknown = False
 
     # ======================================
     # RESULT
     # ======================================
 
     st.divider()
+    st.subheader("🔍 Classification Result")
 
-    st.subheader(
-        "🔍 Classification Result"
-    )
-
-
-    st.success(
-        f"Detected: {predicted_class.upper()}"
-    )
-
+    if is_unknown:
+        st.warning(
+            f"Detected: UNKNOWN\n\n"
+            f"The highest model confidence was "
+            f"{confidence * 100:.2f}%, which is below the "
+            f"{CONFIDENCE_THRESHOLD * 100:.0f}% threshold."
+        )
+    else:
+        st.success(
+            f"Detected: {final_class.upper()}"
+        )
 
     st.metric(
-        "Confidence",
-        f"{confidence:.2f}%"
+        "Final Confidence",
+        f"{confidence * 100:.2f}%"
     )
 
-
-    # ======================================
-    # ALL PROBABILITIES
-    # ======================================
-
-    st.subheader(
-        "Class Probabilities"
+    st.caption(
+        f"Raw model prediction: {raw_predicted_class.upper()}"
     )
 
+    # ======================================
+    # CLASS PROBABILITIES
+    # ======================================
 
-    for i, class_name in enumerate(
-        CLASS_NAMES
-    ):
+    st.subheader("Class Probabilities")
 
-        probability = (
-            predictions[i] * 100
-        )
+    for class_name, probability in zip(CLASS_NAMES, predictions):
+        probability = float(probability)
 
         st.write(
-            f"**{class_name.capitalize()}** "
-            f"{probability:.2f}%"
+            f"{class_name.capitalize()}: "
+            f"{probability * 100:.2f}%"
         )
 
-        st.progress(
-            float(predictions[i])
-        )
+        st.progress(probability)
